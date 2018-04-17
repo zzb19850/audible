@@ -1,0 +1,94 @@
+Problem-01 
+
+--##### python snippet to write json csv on local path ##### 
+
+import urllib2
+url = "https://s3.amazonaws.com/irs-form-990/201103169349300325_public.xml"
+s = urllib2.urlopen(url)
+cont = s.read()
+file = open("2015test.xml", 'w')
+file.write(cont)
+file.close()
+
+--##### python code to parse json URL column and push the xml after reading URL from link to landing zone of HDFS ##### 
+
+import json
+import urllib2 
+from subprocess import Popen, PIPE
+
+target_url=[]
+input_file = open ('index_2013.json')
+json_array = json.load(input_file)
+
+for i in json_array:
+        print i
+        for k in json_array[i]:
+                target_url.append(k['URL'])
+
+
+
+def landing(target):
+	data = urllib2.urlopen(target) 
+	path="/user/zubairzeeshan/landing/2011/"+target[-29:]
+	contents = data.read()
+	result = Popen(["hdfs", "dfs", "-put", "-", path], stdin = PIPE)
+	result.communicate(input=contents)
+
+for i in target_url:landing(i)
+
+
+
+--##### Create and load HIVE table for CSV index ##### 
+create table stg_indexes_cs (RETURN_ID string,	FILING_TYPE	 string,EIN  string,TAX_PERIOD  string,SUB_DATE  date,TAXPAYER_NAME string,RETURN_TYPE  string,DLN  string,OBJECT_ID  string)ROW FORMAT DELIMITED FIELDS TERMINATED BY ',';
+
+LOAD DATA LOCAL INPATH 'index_2012.csv' INTO TABLE stg_indexes_cs;
+
+
+--##### XML Parsing HIVE ##### 
+
+
+add jar hivexmlserde-1.0.5.3.jar;
+drop table statesx;
+
+CREATE   TABLE statesx (
+EIN STRING,
+USAddress map<string,string>
+)
+ROW FORMAT SERDE 'com.ibm.spss.hive.serde2.xml.XmlSerDe'
+WITH SERDEPROPERTIES (
+"column.xpath.EIN"="/Filer/EIN/text()",
+"column.xpath.USAddress"="/Filer/USAddress/*"
+)
+STORED AS
+INPUTFORMAT 'com.ibm.spss.hive.serde2.xml.XmlInputFormat' 
+OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.IgnoreKeyTextOutputFormat'
+LOCATION '/user/zubairzeeshan/landing/2011e/'
+TBLPROPERTIES (
+"xmlinput.start"="<Filer",
+"xmlinput.end"="</Filer>");
+select ein, USAddress["State"] from statesx;
+
+
+
+--##### Spark job for reports ##### 
+
+spark-shell --packages com.databricks:spark-xml_2.10:0.4.1
+import com.databricks.spark.xml.XmlReader
+
+
+val path = "/user/zubairzeeshan/landing/2011/"
+val rdd = sc.wholeTextFiles(path)	
+val a = rdd.toDF()
+val df = a.withColumn("_tmp", split($"_2", "<TotalRevenue>")).select($"_1",$"_tmp".getItem(0).as("col1"),$"_tmp".getItem(1).as("col2"))
+val dff=df.withColumn("tmp", split($"col2", "</TotalRevenue>")).select($"_1",$"tmp".getItem(0).as("Amt"))
+val f = dff.withColumn("tmpf", split($"_1", "2011/")).select($"tmpf".getItem(1).as("prefiln"),$"Amt")
+val ff = f.withColumn("tmpff", split($"prefiln", "_public")).select($"tmpff".getItem(0).as("filname"),$"Amt")
+ff.registerTempTable("filamt")
+sqlContext.sql("select ein,int(amt) from audiotest.stg_indexes_cs inner join filamt on object_id=filname").show(100)
+
+
+
+val fd = sqlContext.sql("select ein,int(amt) rev,int(substr(object_id,1,4)) year from audiotest.stg_indexes_cs inner join filamt on object_id=filname")
+val fdd = fd.filter("rev is not null")
+fdd.registerTempTable("revtable")
+sqlContext.sql("select ein,rev,cy,py,(cy-py)/cy change from (select ein ,rev,year CY,lag(rev,1)over(partition by ein order by year asc) PY from revtable) a").show(1000)

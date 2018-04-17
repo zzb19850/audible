@@ -1,0 +1,59 @@
+Problem-2
+
+--##### Hive tables creation and loading for each csv data set ##### 
+
+drop table s_feat;
+
+CREATE TABLE  s_feat ( 
+store int, 
+day string,
+temp decimal, 
+fuelp decimal,
+mkdown1 string,
+mkdown2 string,
+mkdown3 string,
+mkdown4 string,
+mkdown5 string,
+CPI int,
+unemp decimal,
+isholiday string)
+ROW FORMAT DELIMITED
+ FIELDS TERMINATED BY ','
+ STORED AS TEXTFILE
+ tblproperties ("skip.header.line.count"="1");
+
+
+Load DATA  INPATH '/data/landing/gleif/audiotest/feat.csv' into table s_feat;
+
+drop table s_sales;
+CREATE TABLE  s_sales ( 
+store int, 
+dept int,
+day string,
+weeksales decimal,
+isholiday string)
+ROW FORMAT DELIMITED
+ FIELDS TERMINATED BY ','
+ STORED AS TEXTFILE
+ tblproperties ("skip.header.line.count"="1");
+Load DATA  INPATH '/data/landing/gleif/audiotest/sales.csv' into table s_sales;
+
+drop table s_stores;
+CREATE TABLE  s_stores ( 
+store int, 
+type string,
+size int)
+ROW FORMAT DELIMITED
+ FIELDS TERMINATED BY ','
+ STORED AS TEXTFILE
+ tblproperties ("skip.header.line.count"="1");
+ Load DATA  INPATH '/data/landing/gleif/audiotest/stores.csv' into table s_stores;
+
+
+--##### HIVE QL moving windows functions queries ##### 
+
+select wk, avg(weeksales) from sv_sales group by wk order by wk ;
+
+select f.temp,avg(s.weeksales) from sv_sales s join s_feat f on s.store=f.store group by f.temp; 
+
+select a.* , row_number()over(partition by wk order by weeksales desc) as func from sv_sales a where a.func=1;
